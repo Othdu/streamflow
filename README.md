@@ -1,73 +1,64 @@
-# React + TypeScript + Vite
+# StreamFlow
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Desktop IPTV player for **Xtream Codes** playlists. Built with **Electron**, **React 18**, **TypeScript**, **Vite**, and **Tailwind CSS**.
 
-Currently, two official plugins are available:
+**Repository:** [github.com/Othdu/streamflow](https://github.com/Othdu/streamflow)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Features
 
-## React Compiler
+- Live TV, VOD, and series browsing with categories, search, and favorites  
+- Playback via **hls.js** and **mpegts.js**, with a local HTTP proxy in Electron for CORS, HLS segment routing, and VOD **Range** seeking  
+- Optional **external player** (mpv / VLC)  
+- **EPG** guide and catch-up where the provider supports it  
+- **Themes** and preset palettes, plus a **custom CSS** editor (targets semantic classes such as `.sidebar`, `.channel-card`, `.search-input`; `:root` variables use RGB channels, e.g. `--sf-base: 10 13 20`)  
+- **Arabic** UI option with RTL layout  
+- Settings persisted with **electron-store**; Windows **NSIS** installer via **electron-builder**
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Requirements
 
-## Expanding the ESLint configuration
+- **Node.js** 18+ and npm  
+- **Windows** for the packaged `.exe` (scripts use `electron-builder --win`)
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Development
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+This compiles the Electron main/preload, starts Vite on `http://localhost:5173`, and launches Electron.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Production build (Windows)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run build:win
 ```
+
+Output goes to the `release/` folder (see `package.json` → `build.directories.output`). You should get an installer similar to:
+
+`release/StreamFlow Setup 1.0.0.exe`
+
+**Tip:** If the build fails because `app.asar` is locked, close any running **StreamFlow** or **Electron** instances, or build to a fresh output directory:
+
+```bash
+npm run build
+npx electron-builder --win --config.directories.output=release-new
+```
+
+## Project layout
+
+| Path | Role |
+|------|------|
+| `electron/` | Main process, preload, local stream proxy |
+| `src/` | Renderer (React app) |
+| `dist/` | Vite production bundle |
+| `dist-electron/` | Compiled Electron main/preload (from `tsc -p tsconfig.electron.json`) |
+
+## Configuration
+
+- Add playlists in-app (Xtream server URL, username, password).  
+- Do **not** commit real credentials; they are stored locally by the app.
+
+## License
+
+Specify your license here (e.g. MIT) if you publish the repo publicly.
