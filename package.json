@@ -1,0 +1,85 @@
+{
+  "name": "streamflow",
+  "version": "1.0.0",
+  "description": "Premium IPTV Desktop Player",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "tsc -p tsconfig.electron.json && concurrently -k \"cross-env BROWSER=none vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "tsc && vite build && tsc -p tsconfig.electron.json",
+    "build:win": "npm run build && electron-builder --win",
+    "build:mac": "npm run build && electron-builder --mac",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/react-virtual": "^3.13.23",
+    "axios": "^1.6.0",
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.8.3",
+    "hls.js": "^1.6.16",
+    "mpegts.js": "^1.8.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.20.0",
+    "zustand": "^4.4.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^8.2.0",
+    "cross-env": "^7.0.3",
+    "electron": "^41.2.0",
+    "electron-builder": "^26.8.1",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.3.6",
+    "typescript": "^5.2.2",
+    "vite": "^6.4.2",
+    "vite-plugin-electron": "^0.15.4",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.streamflow.app",
+    "productName": "StreamFlow",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Othdu",
+        "repo": "streamflow"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "StreamFlow",
+      "installerIcon": "public/icon.ico",
+      "uninstallerIcon": "public/icon.ico",
+      "installerHeaderIcon": "public/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "public/icon.icns"
+    }
+  }
+}
