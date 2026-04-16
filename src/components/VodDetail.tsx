@@ -1,7 +1,18 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAppStore } from '@/store'
 import { getXtreamService } from '@/services/xtream'
+import { useI18n } from '@/hooks/useI18n'
 import type { VodStream } from '@/types'
+
+function safeFilename(name: string, ext: string) {
+  const base = name.replace(/[/\\?%*:|"<>]/g, '_').slice(0, 120) || 'video'
+  const e = ext.replace(/^\./, '') || 'mp4'
+  return `${base}.${e}`
+}
+
+const BYTES_PER_GB = 1024 ** 3
+
+type DownloadStats = { received: number; total: number; etaSec: number | null }
 
 interface Props {
   vod: VodStream
@@ -18,9 +29,27 @@ export default function VodDetail({ vod, onClose }: Props) {
   const settings = useAppStore(s => s.settings)
   const playlist = playlists.find(p => p.id === activePlaylistId)
   const isFav = favorites.includes(vod.stream_id)
+  const { t } = useI18n()
 
   const [vodInfo, setVodInfo] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [downloadStats, setDownloadStats] = useState<DownloadStats | null>(null)
+  const [downloadStatus, setDownloadStatus] = useState<'idle' | 'busy' | 'done' | 'error' | 'canceled'>('idle')
+  const downloadProgressUnsub = useRef<(() => void) | null>(null)
+  const smoothedBpsRef = useRef(0)
+  const speedAnchorRef = useRef<{ r: number; t: number } | null>(null)
+
+  const formatEtaSeconds = useCallback(
+    (sec: number) => {
+      if (!isFinite(sec) || sec < 5) return null
+      if (sec < 90) return t('vod.etaSeconds', { n: String(Math.round(sec)) })
+      if (sec < 3600) return t('vod.etaMinutes', { n: String(Math.max(1, Math.round(sec / 60))) })
+      const h = Math.floor(sec / 3600)
+      const m = Math.max(0, Math.round((sec % 3600) / 60))
+      return t('vod.etaHoursMinutes', { h: String(h), m: String(m) })
+    },
+    [t],
+  )
 
   useEffect(() => {
     if (!playlist) return
@@ -45,6 +74,97 @@ export default function VodDetail({ vod, onClose }: Props) {
     onClose()
   }
 
+  const ext = vod.container_extension || 'mp4'
+  const rawStreamUrl = playlist ? getXtreamService(playlist).getVodStreamUrl(vod.stream_id, ext) : ''
+  const canDownload =
+    typeof window !== 'undefined' &&
+    !!(window as any).electron?.vod?.download &&
+    !!rawStreamUrl &&
+    !rawStreamUrl.toLowerCase().includes('.m3u8')
+
+  useEffect(() => () => {
+    downloadProgressUnsub.current?.()
+    downloadProgressUnsub.current = null
+    void (window as any).electron?.vod?.cancelDownload?.()
+  }, [])
+
+  const handleDownload = useCallback(async () => {
+    const el = (window as any).electron?.vod
+    if (!el?.download || !rawStreamUrl) return
+    downloadProgressUnsub.current?.()
+    downloadProgressUnsub.current = null
+    smoothedBpsRef.current = 0
+    speedAnchorRef.current = null
+    setDownloadStatus('busy')
+    setDownloadStats({ received: 0, total: 0, etaSec: null })
+    try {
+      if (typeof el.onDownloadProgress === 'function') {
+        downloadProgressUnsub.current = el.onDownloadProgress((p: { received: number; total: number }) => {
+          const now = Date.now()
+          const { received, total } = p
+
+          const anchor = speedAnchorRef.current
+          if (!anchor) {
+            speedAnchorRef.current = { r: received, t: now }
+          } else if (now - anchor.t >= 400) {
+            const dt = (now - anchor.t) / 1000
+            const dr = received - anchor.r
+            if (dt > 0 && dr >= 0) {
+              const inst = dr / dt
+              const sm = smoothedBpsRef.current
+              smoothedBpsRef.current = sm > 0 ? sm * 0.85 + inst * 0.15 : inst
+            }
+            speedAnchorRef.current = { r: received, t: now }
+          }
+
+          let etaSec: number | null = null
+          const speed = smoothedBpsRef.current
+          if (total > 0 && received > 0 && speed > 32 * 1024) {
+            const sec = (total - received) / speed
+            if (sec >= 5 && sec < 72 * 3600) etaSec = sec
+          }
+
+          setDownloadStats({ received, total, etaSec })
+        })
+      }
+      const result = await el.download({
+        url: rawStreamUrl,
+        defaultFilename: safeFilename(vod.name, ext),
+      })
+      downloadProgressUnsub.current?.()
+      downloadProgressUnsub.current = null
+      if (result?.canceled) {
+        setDownloadStatus('canceled')
+        setDownloadStats(null)
+        return
+      }
+      if (result?.ok) {
+        setDownloadStatus('done')
+        setDownloadStats(null)
+      } else {
+        setDownloadStatus('error')
+        setDownloadStats(null)
+      }
+    } catch {
+      downloadProgressUnsub.current?.()
+      downloadProgressUnsub.current = null
+      setDownloadStatus('error')
+      setDownloadStats(null)
+    }
+  }, [rawStreamUrl, vod.name, ext])
+
+  const handleCancelDownload = useCallback(async () => {
+    const el = (window as any).electron?.vod
+    if (!el?.cancelDownload) return
+    await el.cancelDownload()
+  }, [])
+
+  const showResumeChoice =
+    savedProgress &&
+    savedProgress > 0.05 &&
+    savedProgress < 0.95 &&
+    (settings.resumeVod || settings.alwaysShowResumePrompt)
+
   const formatDuration = (dur: string | undefined) => {
     if (!dur) return null
     const mins = parseInt(dur, 10)
@@ -52,19 +172,6 @@ export default function VodDetail({ vod, onClose }: Props) {
     const h = Math.floor(mins / 60)
     const m = mins % 60
     return h > 0 ? `${h}h ${m}m` : `${m}m`
-  }
-
-  const formatProgress = (progress: number, durationStr?: string) => {
-    if (!durationStr) {
-      const pct = Math.round(progress * 100)
-      return `${pct}%`
-    }
-    const totalMins = parseInt(durationStr, 10)
-    if (isNaN(totalMins)) return `${Math.round(progress * 100)}%`
-    const elapsed = Math.round(progress * totalMins)
-    const h = Math.floor(elapsed / 60)
-    const m = elapsed % 60
-    return h > 0 ? `${h}:${m.toString().padStart(2, '0')}` : `${m}:00`
   }
 
   return (
@@ -103,21 +210,22 @@ export default function VodDetail({ vod, onClose }: Props) {
         </div>
 
         {/* Actions */}
-        <div className="px-5 py-4 flex items-center gap-3 shrink-0">
-          {savedProgress && savedProgress > 0.05 && savedProgress < 0.95 && settings.resumeVod ? (
+        <div className="px-5 py-4 flex flex-col gap-2 shrink-0">
+        <div className="flex items-center gap-3">
+          {showResumeChoice ? (
             <>
               <button
                 onClick={() => handlePlay(savedProgress)}
                 className="flex-1 flex items-center justify-center gap-2 bg-accent hover:bg-accent-hover text-foreground py-2.5 rounded-xl font-medium text-[13px] transition-colors"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                Resume from {formatProgress(savedProgress, info?.duration)}
+                {t('vod.resume')}
               </button>
               <button
                 onClick={() => handlePlay()}
                 className="px-4 py-2.5 rounded-xl bg-overlay/[0.06] hover:bg-overlay/[0.1] text-foreground/70 text-[13px] font-medium transition-colors"
               >
-                Start Over
+                {t('vod.startOver')}
               </button>
             </>
           ) : (
@@ -126,7 +234,7 @@ export default function VodDetail({ vod, onClose }: Props) {
               className="flex-1 flex items-center justify-center gap-2 bg-accent hover:bg-accent-hover text-foreground py-2.5 rounded-xl font-medium text-[13px] transition-colors"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              Play
+              {t('vod.play')}
             </button>
           )}
           <button
@@ -139,6 +247,82 @@ export default function VodDetail({ vod, onClose }: Props) {
               <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
             </svg>
           </button>
+          {canDownload && (
+            <button
+              type="button"
+              onClick={handleDownload}
+              disabled={downloadStatus === 'busy'}
+              className="w-10 h-10 rounded-xl flex items-center justify-center border border-border bg-overlay/[0.04] text-muted hover:text-foreground hover:bg-overlay/[0.08] transition-colors disabled:opacity-50"
+              title={t('vod.download')}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+              </svg>
+            </button>
+          )}
+        </div>
+        {canDownload && (
+          <p className="text-[10px] text-muted/80 leading-relaxed px-0.5">{t('vod.downloadDisclaimer')}</p>
+        )}
+        {downloadStatus === 'busy' && downloadStats && (
+          <div className="w-full space-y-2.5 rounded-xl border border-border bg-overlay/[0.03] px-3 py-3">
+            <div className="space-y-1 text-[11px] text-secondary leading-snug">
+              <p className="text-foreground/85 font-medium tabular-nums">
+                {downloadStats.total > 0
+                  ? t('vod.downloadGbPair', {
+                      used: (downloadStats.received / BYTES_PER_GB).toFixed(2),
+                      total: (downloadStats.total / BYTES_PER_GB).toFixed(2),
+                    })
+                  : t('vod.downloadGbOnly', {
+                      used: (downloadStats.received / BYTES_PER_GB).toFixed(2),
+                    })}
+              </p>
+              <p className="text-muted">
+                {downloadStats.total > 0
+                  ? downloadStats.etaSec != null
+                    ? (() => {
+                        const eta = formatEtaSeconds(downloadStats.etaSec)
+                        return eta ? t('vod.downloadEtaLine', { eta }) : t('vod.downloadEtaPending')
+                      })()
+                    : t('vod.downloadEtaPending')
+                  : t('vod.downloadEtaNoTotal')}
+              </p>
+              {downloadStats.total > 0 && (
+                <p className="text-muted/90 tabular-nums">
+                  {t('vod.downloadingPct', {
+                    pct: String(Math.min(100, Math.round((100 * downloadStats.received) / downloadStats.total))),
+                  })}
+                </p>
+              )}
+            </div>
+            <div className="h-2 rounded-full bg-overlay/15 overflow-hidden">
+              <div
+                className={`h-full rounded-full bg-accent transition-[width] duration-300 ease-out ${
+                  downloadStats.total <= 0 ? 'w-2/5 max-w-[45%] opacity-70 animate-pulse' : ''
+                }`}
+                style={
+                  downloadStats.total > 0
+                    ? {
+                        width: `${Math.min(100, Math.max(0, (100 * downloadStats.received) / downloadStats.total))}%`,
+                      }
+                    : undefined
+                }
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleCancelDownload}
+              className="w-full py-2.5 rounded-xl text-[13px] font-medium border border-red-500/35 bg-red-500/12 text-red-200 hover:bg-red-500/20 hover:border-red-400/45 transition-colors"
+            >
+              {t('vod.stopDownload')}
+            </button>
+          </div>
+        )}
+        {downloadStatus === 'canceled' && (
+          <p className="text-[11px] text-muted">{t('vod.downloadCanceled')}</p>
+        )}
+        {downloadStatus === 'done' && <p className="text-[11px] text-green-400/90">{t('vod.downloadDone')}</p>}
+        {downloadStatus === 'error' && <p className="text-[11px] text-red-400/90">{t('vod.downloadError')}</p>}
         </div>
 
         {/* Info section */}

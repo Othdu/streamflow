@@ -1,6 +1,8 @@
 import { app, BrowserWindow, ipcMain, shell, dialog, Tray, Menu, nativeImage, net } from 'electron'
 import path from 'path'
 import http from 'http'
+import fs from 'fs'
+import type { Readable } from 'stream'
 import { execFile } from 'child_process'
 import Store from 'electron-store'
 import { autoUpdater } from 'electron-updater'
@@ -276,6 +278,210 @@ ipcMain.handle('dialog:open-file', async (_e, options: Electron.OpenDialogOption
   if (!win) return { canceled: true, filePaths: [] }
   return dialog.showOpenDialog(win, options)
 })
+
+/** One active VOD download per renderer (cancel replaces previous registration). */
+const activeVodDownloadAbort = new Map<number, () => void>()
+
+ipcMain.handle('vod:download-cancel', (event) => {
+  activeVodDownloadAbort.get(event.sender.id)?.()
+  return { ok: true }
+})
+
+/** Save a single-file VOD URL to disk (not HLS). */
+ipcMain.handle(
+  'vod:download',
+  async (event, payload: { url: string; defaultFilename: string }) => {
+    const cleanUrl = payload.url.replace(/#resume=[\d.]+$/, '')
+    if (cleanUrl.toLowerCase().includes('.m3u8')) {
+      return { ok: false, error: 'HLS playlists cannot be downloaded as a single file.' }
+    }
+    const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getFocusedWindow()
+    if (!win) return { ok: false, error: 'No window' }
+
+    const safeName = payload.defaultFilename.replace(/[/\\?%*:|"<>]/g, '_') || 'video.mp4'
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      defaultPath: safeName,
+      filters: [
+        { name: 'Video', extensions: ['mp4', 'mkv', 'ts', 'm4v', 'avi', 'mpeg'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    })
+    if (canceled || !filePath) return { ok: false, canceled: true }
+
+    const senderId = event.sender.id
+
+    return await new Promise<{ ok: boolean; path?: string; error?: string; canceled?: boolean }>(
+      (resolve) => {
+        let settled = false
+        let received = 0
+        let total = 0
+        let lastProgressAt = 0
+        let file: fs.WriteStream | null = null
+        let netReq: Electron.ClientRequest | null = null
+        let downloadReadable: Readable | null = null
+
+        const sendProgress = () => {
+          if (settled) return
+          const now = Date.now()
+          if (now - lastProgressAt < 200 && total > 0 && received < total) return
+          lastProgressAt = now
+          if (!win.isDestroyed()) {
+            win.webContents.send('vod:download-progress', { received, total })
+          }
+        }
+
+        const clearActive = () => {
+          activeVodDownloadAbort.delete(senderId)
+        }
+
+        const cleanupPartialFile = () => {
+          try {
+            file?.close()
+          } catch {}
+          file = null
+          try {
+            if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+          } catch {}
+        }
+
+        const finish = (result: { ok: boolean; path?: string; error?: string; canceled?: boolean }) => {
+          if (settled) return
+          settled = true
+          clearActive()
+          resolve(result)
+        }
+
+        const fail = (error: string) => {
+          cleanupPartialFile()
+          finish({ ok: false, error })
+        }
+
+        /** Hard-stop: must run before any async resume (e.g. file 'drain' → readable.resume). */
+        const abortByUser = () => {
+          if (settled) return
+          settled = true
+          clearActive()
+
+          try {
+            netReq?.abort()
+          } catch {}
+          netReq = null
+
+          const r = downloadReadable as (Readable & { destroy?: (err?: Error) => void }) | null
+          downloadReadable = null
+          if (r) {
+            try {
+              r.removeAllListeners?.()
+            } catch {}
+            try {
+              r.destroy?.()
+            } catch {}
+          }
+
+          const ws = file
+          file = null
+          if (ws) {
+            try {
+              ws.removeAllListeners?.('drain')
+              ws.removeAllListeners?.('error')
+            } catch {}
+            try {
+              ;(ws as fs.WriteStream & { destroy?: (err?: Error) => void }).destroy?.()
+            } catch {}
+            try {
+              ws.close()
+            } catch {}
+          }
+
+          try {
+            if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+          } catch {}
+
+          resolve({ ok: false, canceled: true })
+        }
+
+        activeVodDownloadAbort.set(senderId, abortByUser)
+
+        try {
+          const parsed = new URL(cleanUrl)
+          const origin = parsed.origin
+          netReq = net.request({ url: cleanUrl, method: 'GET', useSessionCookies: true })
+          netReq.setHeader(
+            'User-Agent',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          )
+          netReq.setHeader('Accept', '*/*')
+          netReq.setHeader('Accept-Language', 'en-US,en;q=0.9')
+          netReq.setHeader('Referer', `${origin}/`)
+          netReq.setHeader('Connection', 'keep-alive')
+
+          netReq.on('response', (res) => {
+            const settleFail = (msg: string) => {
+              if (settled) return
+              fail(msg)
+            }
+            const settleOk = () => {
+              if (settled) return
+              settled = true
+              clearActive()
+              if (!win.isDestroyed()) {
+                win.webContents.send('vod:download-progress', {
+                  received,
+                  total: total || received,
+                })
+              }
+              resolve({ ok: true, path: filePath })
+            }
+
+            const code = res.statusCode ?? 0
+            if (code >= 400) {
+              settleFail(`HTTP ${code}`)
+              return
+            }
+            const cl = res.headers['content-length']
+            total = cl ? parseInt(String(cl), 10) || 0 : 0
+            file = fs.createWriteStream(filePath)
+
+            const readable = res as unknown as Readable
+            downloadReadable = readable
+            res.on('data', (chunk: Buffer) => {
+              if (settled) return
+              received += chunk.length
+              if (file && !file.write(chunk)) {
+                readable.pause()
+                file.once('drain', () => {
+                  if (settled) return
+                  try {
+                    readable.resume()
+                  } catch {}
+                })
+              }
+              sendProgress()
+            })
+            res.on('end', () => {
+              if (settled) return
+              if (!file) {
+                settleFail('Download incomplete')
+                return
+              }
+              const ws = file
+              file = null
+              ws.end(() => settleOk())
+            })
+            res.on('error', (e) => settleFail(e.message))
+          })
+          netReq.on('error', () => {
+            if (settled) return
+            fail('Download failed')
+          })
+          netReq.end()
+        } catch (e: any) {
+          fail(e?.message || 'Invalid URL')
+        }
+      },
+    )
+  },
+)
 
 ipcMain.handle('app:version', () => app.getVersion())
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAppStore } from '@/store'
 import { getXtreamService } from '@/services/xtream'
+import { useI18n } from '@/hooks/useI18n'
 import type { Series, SeriesInfo, Episode } from '@/types'
 
 interface Props {
@@ -12,6 +13,9 @@ export default function SeriesDetail({ series, onClose }: Props) {
   const playlists = useAppStore(s => s.playlists)
   const activePlaylistId = useAppStore(s => s.activePlaylistId)
   const playStream = useAppStore(s => s.playStream)
+  const watchHistory = useAppStore(s => s.watchHistory)
+  const settings = useAppStore(s => s.settings)
+  const { t } = useI18n()
   const playlist = playlists.find(p => p.id === activePlaylistId)
 
   const [info, setInfo] = useState<SeriesInfo | null>(null)
@@ -34,12 +38,23 @@ export default function SeriesDetail({ series, onClose }: Props) {
       .finally(() => setLoading(false))
   }, [series.series_id, playlist])
 
-  const handlePlayEpisode = (episode: Episode) => {
-    if (!playlist) return
+  const handlePlayEpisode = (episode: Episode, resumePos?: number) => {
+    if (!playlist || activeSeason == null) return
     const svc = getXtreamService(playlist)
     const url = svc.getSeriesStreamUrl(Number(episode.id), episode.container_extension || 'mp4')
+    const resumeParam = resumePos !== undefined ? `#resume=${resumePos}` : ''
     const title = `${series.name} - S${activeSeason}E${episode.episode_num} ${episode.title || ''}`
-    playStream(url, title.trim(), series.cover, Number(episode.id))
+    playStream(
+      url + resumeParam,
+      title.trim(),
+      series.cover,
+      Number(episode.id),
+      {
+        seriesId: series.series_id,
+        seasonNum: Number(activeSeason),
+        episodeNum: episode.episode_num,
+      },
+    )
     onClose()
   }
 
@@ -127,28 +142,63 @@ export default function SeriesDetail({ series, onClose }: Props) {
                 {episodes.length === 0 && (
                   <p className="text-muted text-sm text-center py-8">No episodes found for this season</p>
                 )}
-                {episodes.map((ep: Episode) => (
-                  <button
-                    key={ep.id}
-                    onClick={() => handlePlayEpisode(ep)}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-overlay/[0.04] transition-colors group mb-0.5"
-                  >
-                    <div className="w-8 h-8 rounded-lg bg-overlay/[0.04] flex items-center justify-center text-muted text-[11px] font-bold shrink-0 group-hover:bg-accent group-hover:text-foreground transition-colors">
-                      {ep.episode_num}
-                    </div>
-                    <div className="flex-1 min-w-0 text-left">
-                      <p className="text-[12.5px] text-foreground/90 font-medium truncate">
-                        {ep.title || `Episode ${ep.episode_num}`}
-                      </p>
-                      {ep.info?.duration && (
-                        <p className="text-[10px] text-muted mt-0.5">{ep.info.duration}</p>
+                {episodes.map((ep: Episode) => {
+                  const epStreamId = Number(ep.id)
+                  const historyEntry = watchHistory.find(h => h.streamId === epStreamId)
+                  const saved = historyEntry?.progress
+                  const showResume =
+                    saved != null &&
+                    saved > 0.05 &&
+                    saved < 0.95 &&
+                    (settings.resumeVod || settings.alwaysShowResumePrompt)
+                  return (
+                    <div
+                      key={ep.id}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-overlay/[0.04] transition-colors group mb-0.5"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handlePlayEpisode(ep)}
+                        className="flex flex-1 min-w-0 items-center gap-3 text-left"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-overlay/[0.04] flex items-center justify-center text-muted text-[11px] font-bold shrink-0 group-hover:bg-accent group-hover:text-foreground transition-colors">
+                          {ep.episode_num}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12.5px] text-foreground/90 font-medium truncate">
+                            {ep.title || `Episode ${ep.episode_num}`}
+                          </p>
+                          {ep.info?.duration && (
+                            <p className="text-[10px] text-muted mt-0.5">{ep.info.duration}</p>
+                          )}
+                        </div>
+                        {!showResume && (
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-accent"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                          </div>
+                        )}
+                      </button>
+                      {showResume && saved != null && (
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handlePlayEpisode(ep, saved)}
+                            className="px-2.5 py-1 rounded-lg bg-accent text-foreground text-[11px] font-medium hover:bg-accent-hover transition-colors"
+                          >
+                            {t('series.resume')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handlePlayEpisode(ep)}
+                            className="px-2 py-1 rounded-lg bg-overlay/[0.08] text-secondary text-[11px] font-medium hover:text-foreground transition-colors"
+                          >
+                            {t('series.startOver')}
+                          </button>
+                        </div>
                       )}
                     </div>
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-accent"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                    </div>
-                  </button>
-                ))}
+                  )
+                })}
               </div>
             </>
           )}

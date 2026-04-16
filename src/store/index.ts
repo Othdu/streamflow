@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   bufferMode: 'balanced',
   autoPlay: true,
   resumeVod: true,
+  alwaysShowResumePrompt: false,
   minimizeToTray: false,
   startMinimized: false,
   language: 'en',
@@ -61,7 +62,13 @@ interface AppStore {
   fetchStreams: () => Promise<void>
 
   player: PlayerState
-  playStream: (url: string, name: string, logo?: string, streamId?: number) => void
+  playStream: (
+    url: string,
+    name: string,
+    logo?: string,
+    streamId?: number,
+    episodeInfo?: WatchHistoryEntry['episodeInfo'],
+  ) => void
   stopStream: () => void
   setVolume: (v: number) => void
   setFullscreen: (v: boolean) => void
@@ -87,6 +94,8 @@ const DEFAULT_PLAYER: PlayerState = {
   streamUrl: null,
   channelName: null,
   channelLogo: null,
+  streamId: null,
+  episodeInfo: null,
   isPlaying: false,
   isFullscreen: false,
   volume: 80,
@@ -236,18 +245,33 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   player: DEFAULT_PLAYER,
 
-  playStream: (url, name, logo, streamId) => {
-    set({
-      player: { ...get().player, streamUrl: url, channelName: name, channelLogo: logo ?? null, isPlaying: true },
-    })
-    if (streamId != null) {
-      get().addToHistory({ streamId, name, logo: logo ?? null, type: get().activeTab })
-    } else {
+  playStream: (url, name, logo, streamId, episodeInfo) => {
+    let resolvedId: number | null = streamId ?? null
+    if (resolvedId == null) {
       const found = get().streams.find(s => s.name === name)
       if (found) {
-        const id = 'stream_id' in found ? found.stream_id : (found as Series).series_id
-        get().addToHistory({ streamId: id, name, logo: logo ?? null, type: get().activeTab })
+        resolvedId = 'stream_id' in found ? found.stream_id : (found as Series).series_id
       }
+    }
+    set({
+      player: {
+        ...get().player,
+        streamUrl: url,
+        channelName: name,
+        channelLogo: logo ?? null,
+        isPlaying: true,
+        streamId: resolvedId,
+        episodeInfo: episodeInfo ?? null,
+      },
+    })
+    if (resolvedId != null) {
+      get().addToHistory({
+        streamId: resolvedId,
+        name,
+        logo: logo ?? null,
+        type: get().activeTab,
+        ...(episodeInfo ? { episodeInfo } : {}),
+      })
     }
   },
 

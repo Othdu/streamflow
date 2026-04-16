@@ -52,9 +52,13 @@ const translations: Record<Language, Record<string, string>> = {
     'player.audio': 'Audio',
     'player.subtitles': 'Subtitles',
     'player.off': 'Off',
+    'player.alwaysShowResumePrompt': 'Always show resume prompt',
+    'player.alwaysShowResumePromptDesc':
+      'Offer Resume and Start over when a saved position exists, even if Resume VOD is turned off.',
 
     // VOD Detail
     'vod.play': 'Play',
+    'vod.resume': 'Resume',
     'vod.resumeFrom': 'Resume from {time}',
     'vod.startOver': 'Start Over',
     'vod.loadingDetails': 'Loading details...',
@@ -65,6 +69,28 @@ const translations: Record<Language, Record<string, string>> = {
     'vod.duration': 'Duration',
     'vod.cast': 'Cast',
     'vod.movie': 'Movie',
+    'vod.download': 'Download to device',
+    'vod.downloading': 'Downloading…',
+    'vod.downloadingPct': 'Downloading… {pct}%',
+    'vod.downloadDone': 'File saved successfully.',
+    'vod.downloadError': 'Download failed. Try again or check your connection.',
+    'vod.downloadCancel': 'Cancel download',
+    'vod.downloadCanceled': 'Download canceled.',
+    'vod.stopDownload': 'Stop download',
+    'vod.downloadGbPair': '{used} GB of {total} GB',
+    'vod.downloadGbOnly': '{used} GB downloaded',
+    'vod.downloadEtaPending': 'Estimating time remaining…',
+    'vod.downloadEtaLine': '~{eta} remaining',
+    'vod.downloadEtaNoTotal': 'Full file size unknown — time remaining can\'t be estimated.',
+    'vod.etaSeconds': '{n} sec',
+    'vod.etaMinutes': '{n} min',
+    'vod.etaHoursMinutes': '{h} h {m} min',
+    'vod.downloadDisclaimer':
+      'For personal use only. You are responsible for complying with your provider\'s terms and applicable laws.',
+
+    // Series detail
+    'series.resume': 'Resume',
+    'series.startOver': 'From start',
 
     // EPG
     'epg.title': 'TV Guide',
@@ -196,9 +222,13 @@ const translations: Record<Language, Record<string, string>> = {
     'player.audio': 'الصوت',
     'player.subtitles': 'الترجمة',
     'player.off': 'إيقاف',
+    'player.alwaysShowResumePrompt': 'إظهار مطالبة الاستئناف دائماً',
+    'player.alwaysShowResumePromptDesc':
+      'عرض استئناف والبدء من جديد عند وجود موضع محفوظ، حتى عند إيقاف استئناف الأفلام.',
 
     // VOD Detail
     'vod.play': 'تشغيل',
+    'vod.resume': 'استئناف',
     'vod.resumeFrom': 'استئناف من {time}',
     'vod.startOver': 'البدء من جديد',
     'vod.loadingDetails': 'جاري تحميل التفاصيل...',
@@ -209,6 +239,28 @@ const translations: Record<Language, Record<string, string>> = {
     'vod.duration': 'المدة',
     'vod.cast': 'الممثلون',
     'vod.movie': 'فيلم',
+    'vod.download': 'تنزيل على الجهاز',
+    'vod.downloading': 'جاري التنزيل…',
+    'vod.downloadingPct': 'جاري التنزيل… {pct}٪',
+    'vod.downloadDone': 'تم حفظ الملف بنجاح.',
+    'vod.downloadError': 'فشل التنزيل. حاول مرة أخرى أو تحقق من الاتصال.',
+    'vod.downloadCancel': 'إلغاء التنزيل',
+    'vod.downloadCanceled': 'تم إلغاء التنزيل.',
+    'vod.stopDownload': 'إيقاف التنزيل',
+    'vod.downloadGbPair': '{used} جيجابايت من {total} جيجابايت',
+    'vod.downloadGbOnly': 'تم تنزيل {used} جيجابايت',
+    'vod.downloadEtaPending': 'جاري تقدير الوقت المتبقي…',
+    'vod.downloadEtaLine': '~{eta} متبقية',
+    'vod.downloadEtaNoTotal': 'حجم الملف غير معروف — لا يمكن تقدير الوقت المتبقي.',
+    'vod.etaSeconds': '{n} ث',
+    'vod.etaMinutes': '{n} د',
+    'vod.etaHoursMinutes': '{h} س {m} د',
+    'vod.downloadDisclaimer':
+      'للاستخدام الشخصي فقط. أنت مسؤول عن الالتزام بشروط المزود والقوانين المعمول بها.',
+
+    // Series detail
+    'series.resume': 'استئناف',
+    'series.startOver': 'من البداية',
 
     // EPG
     'epg.title': 'دليل التلفزيون',

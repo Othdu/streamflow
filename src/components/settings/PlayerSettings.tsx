@@ -1,4 +1,5 @@
 import { useAppStore } from '@/store'
+import { useI18n } from '@/hooks/useI18n'
 
 declare global {
   interface Window {
@@ -14,6 +15,7 @@ declare global {
 export default function PlayerSettings() {
   const settings = useAppStore(s => s.settings)
   const updateSettings = useAppStore(s => s.updateSettings)
+  const { t } = useI18n()
 
   const browsePlayer = async () => {
     if (!window.electron?.dialog) return
@@ -96,6 +98,19 @@ export default function PlayerSettings() {
             className={`w-12 h-7 rounded-full transition-colors relative ${settings.resumeVod ? 'bg-accent' : 'bg-overlay/10'}`}
           >
             <span className={`absolute top-1 w-5 h-5 rounded-full bg-foreground transition-all ${settings.resumeVod ? 'left-6' : 'left-1'}`} />
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between py-4 border-b border-border">
+          <div>
+            <p className="text-[15px] text-foreground font-medium">{t('player.alwaysShowResumePrompt')}</p>
+            <p className="text-sm text-muted mt-1">{t('player.alwaysShowResumePromptDesc')}</p>
+          </div>
+          <button
+            onClick={() => updateSettings({ alwaysShowResumePrompt: !settings.alwaysShowResumePrompt })}
+            className={`w-12 h-7 rounded-full transition-colors relative ${settings.alwaysShowResumePrompt ? 'bg-accent' : 'bg-overlay/10'}`}
+          >
+            <span className={`absolute top-1 w-5 h-5 rounded-full bg-foreground transition-all ${settings.alwaysShowResumePrompt ? 'left-6' : 'left-1'}`} />
           </button>
         </div>
 

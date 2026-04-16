@@ -36,4 +36,14 @@ contextBridge.exposeInMainWorld('electron', {
     },
   },
   getVersion: () => ipcRenderer.invoke('app:version'),
+  vod: {
+    download: (args: { url: string; defaultFilename: string }) =>
+      ipcRenderer.invoke('vod:download', args),
+    cancelDownload: () => ipcRenderer.invoke('vod:download-cancel'),
+    onDownloadProgress: (cb: (p: { received: number; total: number }) => void) => {
+      const listener = (_e: unknown, data: { received: number; total: number }) => cb(data)
+      ipcRenderer.on('vod:download-progress', listener)
+      return () => ipcRenderer.removeListener('vod:download-progress', listener)
+    },
+  },
 })

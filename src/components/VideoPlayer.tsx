@@ -18,6 +18,8 @@ export default function VideoPlayer() {
   const streamUrl = useAppStore(s => s.player.streamUrl)
   const channelName = useAppStore(s => s.player.channelName)
   const channelLogo = useAppStore(s => s.player.channelLogo)
+  const playerStreamId = useAppStore(s => s.player.streamId)
+  const playerEpisodeInfo = useAppStore(s => s.player.episodeInfo)
   const isPlaying = useAppStore(s => s.player.isPlaying)
   const volume = useAppStore(s => s.player.volume)
   const stopStream = useAppStore(s => s.stopStream)
@@ -26,7 +28,6 @@ export default function VideoPlayer() {
   const activeTab = useAppStore(s => s.activeTab)
   const settings = useAppStore(s => s.settings)
   const addToHistory = useAppStore(s => s.addToHistory)
-  const watchHistory = useAppStore(s => s.watchHistory)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -278,8 +279,8 @@ export default function VideoPlayer() {
       onFail(`Native playback error (code ${code})`)
     }
     function cleanup() {
-      vid.removeEventListener('canplay', onCanPlay)
-      vid.removeEventListener('error', onError)
+      vid?.removeEventListener('canplay', onCanPlay)
+      vid?.removeEventListener('error', onError)
     }
     vid.addEventListener('canplay', onCanPlay)
     vid.addEventListener('error', onError)
@@ -405,30 +406,49 @@ export default function VideoPlayer() {
     }
   }, [streamUrl])
 
-  // VOD progress saving — every 10 seconds
+  // VOD progress saving — interval, pause, tab hide, unload, and flush on cleanup
   useEffect(() => {
-    if (!isVod || !streamUrl) return
+    if (!isVod || !streamUrl || playerStreamId == null) return
     const vid = videoRef.current
     if (!vid) return
 
     const save = () => {
       if (!vid.duration || !isFinite(vid.duration) || vid.duration <= 0) return
       const progress = vid.currentTime / vid.duration
-      if (progress > 0.01) {
-        const baseUrl = streamUrl.replace(/#resume=[\d.]+$/, '')
-        const name = channelName || ''
-        const logo = channelLogo || null
-        addToHistory({ streamId: 0, name, logo, type: activeTab, progress })
-      }
+      if (progress <= 0.01) return
+      const name = channelName || ''
+      const logo = channelLogo || null
+      addToHistory({
+        streamId: playerStreamId,
+        name,
+        logo,
+        type: activeTab,
+        progress,
+        ...(activeTab === 'series' && playerEpisodeInfo ? { episodeInfo: playerEpisodeInfo } : {}),
+      })
     }
 
     const interval = setInterval(save, 10000)
-    return () => clearInterval(interval)
-  }, [isVod, streamUrl, channelName, channelLogo, activeTab, addToHistory])
+    const onPause = () => save()
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') save()
+    }
+    const onBeforeUnload = () => save()
+    vid.addEventListener('pause', onPause)
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      clearInterval(interval)
+      save()
+      vid.removeEventListener('pause', onPause)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+    }
+  }, [isVod, streamUrl, playerStreamId, playerEpisodeInfo, channelName, channelLogo, activeTab, addToHistory])
 
-  // VOD resume on mount — seek to saved position
+  // VOD resume on mount — seek when URL carries #resume= (explicit resume from UI)
   useEffect(() => {
-    if (!isVod || !streamUrl || !settings.resumeVod) return
+    if (!isVod || !streamUrl) return
     const vid = videoRef.current
     if (!vid) return
 
@@ -445,7 +465,7 @@ export default function VideoPlayer() {
     }
     vid.addEventListener('loadedmetadata', onLoaded)
     return () => vid.removeEventListener('loadedmetadata', onLoaded)
-  }, [streamUrl, isVod, settings.resumeVod])
+  }, [streamUrl, isVod])
 
   const selectAudioTrack = useCallback((idx: number) => {
     const vid = videoRef.current as any

@@ -170,6 +170,8 @@ export interface PlayerState {
   streamUrl: string | null
   channelName: string | null
   channelLogo: string | null
+  streamId: number | null
+  episodeInfo: WatchHistoryEntry['episodeInfo'] | null
   isPlaying: boolean
   isFullscreen: boolean
   volume: number
@@ -217,6 +219,8 @@ export interface AppSettings {
   bufferMode: 'low' | 'balanced' | 'smooth'
   autoPlay: boolean
   resumeVod: boolean
+  /** Show Resume / Start over when progress exists even if Resume VOD is off */
+  alwaysShowResumePrompt: boolean
   minimizeToTray: boolean
   startMinimized: boolean
   language: Language
