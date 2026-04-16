@@ -122,25 +122,34 @@ export default function VideoPlayer() {
   }, [])
 
   // Try HLS via hls.js (for .m3u8 streams)
-  const tryHls = useCallback((proxyUrl: string, onFail: (reason: string) => void) => {
+  const tryHls = useCallback((proxyUrl: string, onFail: (reason: string) => void, live = false) => {
     const vid = videoRef.current
     if (!vid || !Hls.isSupported()) { onFail('HLS not supported'); return }
 
     setStatus('Connecting via HLS...')
+    // IPTV is almost always standard HLS, not LL-HLS — lowLatencyMode breaks many providers.
     const hls = new Hls({
       enableWorker: true,
-      lowLatencyMode: true,
-      backBufferLength: 60,
-      maxBufferLength: 60,
+      lowLatencyMode: false,
+      backBufferLength: live ? 90 : 60,
+      maxBufferLength: live ? 120 : 60,
+      maxBufferSize: 120 * 1000 * 1000,
+      ...(live
+        ? {
+            liveDurationInfinity: true,
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: Infinity,
+          }
+        : {}),
       // Generous retries — live streams have occasional bad segments
-      fragLoadingMaxRetry: 6,
+      fragLoadingMaxRetry: 8,
       fragLoadingRetryDelay: 500,
-      manifestLoadingMaxRetry: 4,
+      manifestLoadingMaxRetry: 6,
       manifestLoadingRetryDelay: 500,
-      levelLoadingMaxRetry: 4,
-      manifestLoadingTimeOut: 15000,
-      fragLoadingTimeOut: 20000,
-      levelLoadingTimeOut: 15000,
+      levelLoadingMaxRetry: 6,
+      manifestLoadingTimeOut: 20000,
+      fragLoadingTimeOut: 30000,
+      levelLoadingTimeOut: 20000,
     })
     hlsRef.current = hls
     setHlsInstance(hls)
@@ -153,32 +162,54 @@ export default function VideoPlayer() {
 
     let mediaRecoveries = 0
     let networkRecoveries = 0
-    const MAX_RECOVERIES = 3
+    const MAX_MEDIA = 6
+    const MAX_NET = 5
 
     hls.on(Hls.Events.ERROR, (_e, data) => {
-      if (!data.fatal) return   // non-fatal: hls.js handles it internally
+      if (!data.fatal) return
 
       console.warn('[HLS fatal]', data.type, data.details, data.response?.code)
 
-      // Standard hls.js recovery pattern
-      if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveries < MAX_RECOVERIES) {
+      // Buffer stalls / holes on live IPTV — recover before giving up
+      const detail = String(data.details || '')
+      if (
+        detail.includes('buffer') ||
+        detail.includes('Buffer') ||
+        detail === 'bufferStalledError' ||
+        detail === 'bufferSeekOverHole'
+      ) {
+        if (mediaRecoveries < MAX_MEDIA) {
+          mediaRecoveries++
+          console.log(`[HLS] recoverMediaError (${detail}) attempt ${mediaRecoveries}`)
+          try {
+            hls.recoverMediaError()
+          } catch {
+            /* ignore */
+          }
+          return
+        }
+      }
+
+      if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveries < MAX_MEDIA) {
         mediaRecoveries++
         console.log(`[HLS] recoverMediaError attempt ${mediaRecoveries}`)
-        hls.recoverMediaError()
+        try {
+          hls.recoverMediaError()
+        } catch {
+          /* ignore */
+        }
         return
       }
 
-      if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRecoveries < MAX_RECOVERIES) {
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRecoveries < MAX_NET) {
         networkRecoveries++
         console.log(`[HLS] startLoad retry attempt ${networkRecoveries}`)
-        // Brief delay before reconnect so the server isn't immediately hammered
         setTimeout(() => {
           if (hlsRef.current === hls) hls.startLoad()
         }, 1500)
         return
       }
 
-      // Truly unrecoverable after all retries
       hls.destroy()
       hlsRef.current = null
       setHlsInstance(null)
@@ -212,7 +243,16 @@ export default function VideoPlayer() {
     )
     mpegtsRef.current = player
 
+    let mediaInfoTimeout: ReturnType<typeof setTimeout> | null = null
+
     player.on(mpegts.Events.MEDIA_INFO, (info: any) => {
+      // Critical: clear the "no MEDIA_INFO" timeout once playback is ready — otherwise it
+      // fires ~20s after load() and tears down a working live stream.
+      if (mediaInfoTimeout != null) {
+        clearTimeout(mediaInfoTimeout)
+        mediaInfoTimeout = null
+      }
+
       const vcodec = info?.videoCodec || ''
       const acodec = info?.audioCodec || ''
       const codec = [vcodec, acodec].filter(Boolean).join(' + ')
@@ -246,8 +286,8 @@ export default function VideoPlayer() {
     player.attachMediaElement(vid)
     player.load()
 
-    // Safety timeout — some streams never fire ERROR but also never play
-    const t = setTimeout(() => {
+    // Safety timeout — only if no MEDIA_INFO (successful decode) within this window
+    mediaInfoTimeout = setTimeout(() => {
       if (mpegtsRef.current === player) {
         console.warn('[mpegts] timeout waiting for MEDIA_INFO')
         try { player.unload(); player.detachMediaElement(); player.destroy() } catch {}
@@ -256,7 +296,10 @@ export default function VideoPlayer() {
       }
     }, 20000)
 
-    cleanupRef.current = () => clearTimeout(t)
+    cleanupRef.current = () => {
+      if (mediaInfoTimeout != null) clearTimeout(mediaInfoTimeout)
+      mediaInfoTimeout = null
+    }
   }, [volume, settings.bufferMode, settings.autoPlay])
 
   // Try native HTML5 (mp4, mkv, etc. — VOD only)
@@ -325,7 +368,7 @@ export default function VideoPlayer() {
               ? 'Your stream uses H.265/HEVC. Make sure the Windows HEVC Video Extension is installed (free from Microsoft Store), then restart StreamFlow.'
               : 'Your provider\'s stream could not be decoded. Try an external player like mpv or VLC which support more codecs.'
             setError(`Stream cannot be played in-app.\n\n${hevcHint}`)
-          })
+          }, true)
         })
       }
       const playHlsFirst = () => {
@@ -341,7 +384,7 @@ export default function VideoPlayer() {
               : 'Your provider\'s stream could not be decoded. Try an external player like mpv or VLC which support more codecs.'
             setError(`Stream cannot be played in-app.\n\n${hevcHint}`)
           })
-        })
+        }, true)
       }
 
       if (fmt === 'ts') playMpegtsFirst()
