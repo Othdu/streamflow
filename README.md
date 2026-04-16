@@ -6,13 +6,15 @@ Desktop IPTV player for **Xtream Codes** playlists. Built with **Electron**, **R
 
 ## Features
 
-- Live TV, VOD, and series browsing with categories, search, and favorites  
-- Playback via **hls.js** and **mpegts.js**, with a local HTTP proxy in Electron for CORS, HLS segment routing, and VOD **Range** seeking  
+- **Live TV**, **VOD**, and **series** with categories, search, favorites, and watch history  
+- **Resume playback** for movies and episodes: continue from last position or start over, with optional “always show resume” in Settings  
+- Playback via **hls.js** and **mpegts.js**, with a **local HTTP proxy** in Electron for CORS, HLS segment routing, and VOD **Range** seeking  
+- **VOD download to disk** (single-file streams; save dialog, progress, cancel) — use responsibly and respect your provider’s terms  
 - Optional **external player** (mpv / VLC)  
 - **EPG** guide and catch-up where the provider supports it  
 - **Themes** and preset palettes, plus a **custom CSS** editor (targets semantic classes such as `.sidebar`, `.channel-card`, `.search-input`; `:root` variables use RGB channels, e.g. `--sf-base: 10 13 20`)  
 - **Arabic** UI option with RTL layout  
-- Settings persisted with **electron-store**; Windows **NSIS** installer via **electron-builder**
+- Settings persisted with **electron-store**; Windows **NSIS** installer via **electron-builder**; in-app updates via **electron-updater**
 
 ## Requirements
 
@@ -49,7 +51,7 @@ npx electron-builder --win --config.directories.output=release-new
 
 | Path | Role |
 |------|------|
-| `electron/` | Main process, preload, local stream proxy |
+| `electron/` | Main process, preload, local stream proxy, VOD download IPC |
 | `src/` | Renderer (React app) |
 | `dist/` | Vite production bundle |
 | `dist-electron/` | Compiled Electron main/preload (from `tsc -p tsconfig.electron.json`) |
@@ -58,6 +60,10 @@ npx electron-builder --win --config.directories.output=release-new
 
 - Add playlists in-app (Xtream server URL, username, password).  
 - Do **not** commit real credentials; they are stored locally by the app.
+
+## Contributing / Git
+
+- **Do not commit** `release/` or `release-new/` build outputs (installers and unpacked Electron trees). They are listed in `.gitignore` and are large for Git; use **GitHub Releases** to distribute installers.
 
 ## License
 
